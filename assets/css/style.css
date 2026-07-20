@@ -1,0 +1,61 @@
+/* =========================
+   ANIMATIONS
+========================= */
+
+@keyframes popupShow {
+    0% {
+        opacity: 0;
+        transform: scale(0.7) translateY(30px);
+    }
+    100% {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+    }
+}
+
+@keyframes iconBounce {
+    0%,100% {
+        transform: translateY(0);
+    }
+    30% {
+        transform: translateY(-12px);
+    }
+    60% {
+        transform: translateY(4px);
+    }
+}
+
+@keyframes fadeOverlay {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+.popup-overlay {
+    animation: fadeOverlay .4s ease;
+}
+
+.popup-card {
+    animation: popupShow .5s ease-out;
+}
+
+.popup-icon {
+    animation: iconBounce 1.2s ease;
+}
+
+.dismiss-btn {
+    transition: all .3s ease;
+}
+
+.dismiss-btn:hover {
+    background-color: #1b5e20 !important;
+    transform: translateY(-3px);
+    box-shadow: 0 8px 20px rgba(46,125,50,.4);
+}
+
+#contactSection {
+    transition: opacity .4s ease;
+}
