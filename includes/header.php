@@ -1,6 +1,6 @@
 <?php
 if (session_status() === PHP_SESSION_NONE) { session_start(); }
-$base_url = "http://localhost/grail/";
+$base_url = "http://grail.local";
 $current_page = basename($_SERVER['PHP_SELF']);
 ?>
 <!DOCTYPE html>
