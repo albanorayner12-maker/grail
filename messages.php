@@ -72,60 +72,57 @@ if (isset($_GET['action']) && $_GET['action'] === 'send') {
     }
     exit;
 }
-
-// ==========================================
-// 6. VISUAL USER INTERFACE (STOPS BLANK PAGE)
-// ==========================================
+?>
 <!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Support Helpdesk Desk</title>
-    <style>
-        :root {
-            --bg-color: #f3f4f6;
-            --panel-bg: #ffffff;
-            --primary: #2563eb;
-            --primary-hover: #1d4ed8;
-            --user-bubble: #dbeafe;
-            --system-bubble: #f3f4f6;
-            --handover-bubble: #fef3c7;
-            --text-dark: #1f2937;
-        }
-        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-        body { background-color: var(--bg-color); color: var(--text-dark); display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 20px; }
+    <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Support Helpdesk Desk</title>
+                <style>
+                    :root {
+                        --bg-color: #f3f4f6;
+                        --panel-bg: #ffffff;
+                        --primary: #2563eb;
+                        --primary-hover: #1d4ed8;
+                        --user-bubble: #dbeafe;
+                        --system-bubble: #f3f4f6;
+                        --handover-bubble: #fef3c7;
+                        --text-dark: #1f2937;
+                    }
+                    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+                    body { background-color: var(--bg-color); color: var(--text-dark); display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 20px; }
         
-        .chat-app { width: 100%; max-width: 650px; background: var(--panel-bg); border-radius: 12px; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1); display: flex; flex-direction: column; overflow: hidden; height: 80vh; }
-        .chat-header { background: var(--primary); color: white; padding: 16px 20px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
-        .chat-header h2 { font-size: 1.1rem; font-weight: 600; }
-        .ticket-badge { background: rgba(255, 255, 255, 0.2); padding: 4px 10px; border-radius: 20px; font-size: 0.8rem; font-family: monospace; }
+                    .chat-app { width: 100%; max-width: 650px; background: var(--panel-bg); border-radius: 12px; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1); display: flex; flex-direction: column; overflow: hidden; height: 80vh; }
+                    .chat-header { background: var(--primary); color: white; padding: 16px 20px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+                    .chat-header h2 { font-size: 1.1rem; font-weight: 600; }
+                    .ticket-badge { background: rgba(255, 255, 255, 0.2); padding: 4px 10px; border-radius: 20px; font-size: 0.8rem; font-family: monospace; }
         
-        .system-banner { background: #eff6ff; border-bottom: 1px solid #e5e7eb; padding: 12px 20px; font-size: 0.85rem; color: #4b5563; line-height: 1.4; }
+                    .system-banner { background: #eff6ff; border-bottom: 1px solid #e5e7eb; padding: 12px 20px; font-size: 0.85rem; color: #4b5563; line-height: 1.4; }
         
-        .message-window { flex: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; background: #fafafa; }
-        .msg { max-width: 80%; padding: 12px 16px; border-radius: 12px; font-size: 0.95rem; line-height: 1.4; animation: fadeIn 0.2s ease-in-out; }
+                    .message-window { flex: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; background: #fafafa; }
+                    .msg { max-width: 80%; padding: 12px 16px; border-radius: 12px; font-size: 0.95rem; line-height: 1.4; animation: fadeIn 0.2s ease-in-out; }
         
-        /* Message bubble routing variants */
-        .msg.user { background: var(--user-bubble); align-self: flex-end; border-bottom-right-radius: 2px; color: #1e40af; }
-        .msg.recipient { background: var(--panel-bg); align-self: flex-start; border-bottom-left-radius: 2px; border: 1px solid #e5e7eb; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
-        .msg.system-alert { background: var(--handover-bubble); align-self: center; text-align: center; border-radius: 8px; font-size: 0.85rem; color: #92400e; border: 1px solid #fde68a; max-width: 90%; }
         
-        .input-footer { padding: 16px 20px; background: var(--panel-bg); border-top: 1px solid #e5e7eb; display: flex; gap: 10px; align-items: center; }
-        .input-footer input { flex: 1; padding: 12px 16px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 0.95rem; outline: none; transition: border 0.15s ease; }
-        .input-footer input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15); }
-        .input-footer button { padding: 12px 24px; background: var(--primary); color: white; border: none; border-radius: 8px; font-weight: 500; font-size: 0.95rem; cursor: pointer; transition: background 0.15s ease; }
-        .input-footer button:hover { background: var(--primary-hover); }
+                    .msg.user { background: var(--user-bubble); align-self: flex-end; border-bottom-right-radius: 2px; color: #1e40af; }
+                    .msg.recipient { background: var(--panel-bg); align-self: flex-start; border-bottom-left-radius: 2px; border: 1px solid #e5e7eb; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
+                    .msg.system-alert { background: var(--handover-bubble); align-self: center; text-align: center; border-radius: 8px; font-size: 0.85rem; color: #92400e; border: 1px solid #fde68a; max-width: 90%; }
         
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
-    </style>
-</head>
-<body>
-
-<div class="chat-app">
-    <!-- Header banner -->
-    <div class="chat-header">
-        <h2>Support Desk Engine</h2>
+                    .input-footer { padding: 16px 20px; background: var(--panel-bg); border-top: 1px solid #e5e7eb; display: flex; gap: 10px; align-items: center; }
+                    .input-footer input { flex: 1; padding: 12px 16px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 0.95rem; outline: none; transition: border 0.15s ease; }
+                    .input-footer input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15); }
+                    .input-footer button { padding: 12px 24px; background: var(--primary); color: white; border: none; border-radius: 8px; font-weight: 500; font-size: 0.95rem; cursor: pointer; transition: background 0.15s ease; }
+                    .input-footer button:hover { background: var(--primary-hover); }
+        
+                    @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+                </style>
+        </head>
+    <body>
+ 
+        <div class="chat-app">
+            <!-- Header banner -->
+            <div class="chat-header">
+                <h2>Support Desk Engine</h2>
         <div class="ticket-badge">REF: <?php echo htmlspecialchars($case_ref); ?></div>
     </div>
     
@@ -144,7 +141,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'send') {
         <input type="text" id="msgText" placeholder="Type your support request details..." onkeypress="handleKeyPress(event)">
         <button onclick="testSendMessage()">Send Message</button>
     </div>
-</div>
+    </div>
 
 <script>
 function handleKeyPress(event) {
@@ -165,29 +162,36 @@ async function testSendMessage() {
 
     // 2. Transmit payload to self-contained backend file routing loop
     try {
-        const response = await fetch('?action=send&case_ref=<?php echo urlencode($case_ref); ?>', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message_text: msg })
-        });
 
-        const data = await response.json();
-        
-        if(data.success) {
-            // Is the system detecting a switch handover request?
-            const lowerMsg = msg.toLowerCase();
-            if (lowerMsg.includes('admin') || lowerMsg.includes('human') || lowerMsg.includes('person')) {
-                appendMessage("🔄 AI Assistant: Transferring case history logs to the Investigator Desk. A live representative will review your ticket details shortly.", 'system-alert');
-            } else {
-                // In production, fetch the updated table log here. For instant interface rendering:
-                appendMessage("AI response successfully logged to system database backend. Refresh window view to pull text arrays.", 'recipient');
-            }
-        } else {
-            appendMessage("⚠️ Connection or database error returned from transaction node.", 'system-alert');
-        }
-    } catch (err) {
-        appendMessage("⚠️ Critical network level communication fault caught.", 'system-alert');
+    const response = await fetch('?action=send&case_ref=<?php echo urlencode($case_ref); ?>', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            message_text: msg
+        })
+    });
+
+    const raw = await response.text();
+
+    console.log(raw);
+
+    const data = JSON.parse(raw);
+
+    if(data.success){
+        appendMessage(data.reply || "Success","recipient");
+    }else{
+        appendMessage(data.error,"system-alert");
     }
+
+} catch(err){
+
+    console.error(err);
+
+    appendMessage(err.message,"system-alert");
+
+}
 }
 
 function appendMessage(text, role) {
@@ -200,8 +204,8 @@ function appendMessage(text, role) {
     // Auto scroll view area downwards
     container.scrollTop = container.scrollHeight;
 }
-</script>
+    </script>
 
-</body>
+    </body>
 </html>
 
