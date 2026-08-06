@@ -137,7 +137,8 @@ require_once 'includes/header.php';
     transform: translateY(-1px);
   }
 
-  .btn-premium-solid, .btn-premium-outline { min-height: 50px; display: inline-flex; align-items: center; justify-content: center; }
+  .btn-premium-solid, .btn-premium-outline
+   { min-height: 50px; display: inline-flex; align-items: center; justify-content: center;}
   .feature-title, .section-title { color: var(--deep-green); }
   .feature-title { font-size: 1.25rem; }
   .feature-copy { color: var(--deep-green); font-size: 1.05rem; line-height: 1.65; opacity: .82; }
@@ -249,7 +250,7 @@ require_once 'includes/header.php';
     </div>
 
     <div class="col-md-6 col-lg-3">
-      <a href="login.php" class="feature-card-link">
+      <a class="feature-card-link">
         <div class="card glass-card h-100 text-center p-3 p-xl-4">
           <div class="card-body p-2 p-xl-3">
             <div class="card-icon-frame d-inline-flex align-items-center justify-content-center rounded-circle mb-3">
