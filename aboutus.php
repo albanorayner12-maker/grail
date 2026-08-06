@@ -132,7 +132,7 @@ require_once 'includes/header.php';
                         <i class="fas fa-users section-badge-icon"></i> Our Team
                     </h2>
                     <p class="mb-3">
-                        Behind GRAIL is a <strong>dedicated group of professionals</strong> working collaboratively toward a common goal: empowering safer communities.
+                        Behind GRAIL is a <strong>dedicated group of individuals</strong> working collaboratively toward a common goal: empowering safer communities.
                     </p>
                     <p class="mb-0">
                         Our multidisciplinary team comprises <strong>developers, designers, system analysts, and support specialists</strong>. United by a passion for public service and technical excellence, we continuously refine GRAIL to meet the evolving needs of our users and administrators.
