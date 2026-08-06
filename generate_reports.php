@@ -1,93 +1,91 @@
 <?php
-require_once 'includes/header.php';
+if (session_status() === PHP_SESSION_NONE) { session_start(); }
+
+$userDisplayName = trim((string) ($_SESSION['admin_name'] ?? $_SESSION['user_name'] ?? $_SESSION['admin_username'] ?? '')) ?: 'Preview User';
+$liveMode = isset($_SESSION['admin_logged_in']) && empty($_SESSION['admin_preview']);
+$sampleRecords = [
+    ['tracking_token'=>'GRL-2026-1042','subject'=>'Laboratory equipment concern','name'=>'Faculty Member','category'=>'academic','priority'=>'high','status'=>'pending','created_at'=>'2026-07-30 09:15:00'],
+    ['tracking_token'=>'GRL-2026-1039','subject'=>'Student service response delay','name'=>'Student','category'=>'administrative','priority'=>'medium','status'=>'under investigation','created_at'=>'2026-07-29 15:45:00'],
+    ['tracking_token'=>'GRL-2026-1034','subject'=>'Facilities maintenance request','name'=>'Department Staff','category'=>'safety','priority'=>'low','status'=>'resolved','created_at'=>'2026-07-28 10:20:00'],
+    ['tracking_token'=>'GRL-2026-1031','subject'=>'Network access request','name'=>'Faculty Member','category'=>'technology','priority'=>'medium','status'=>'resolved','created_at'=>'2026-07-27 11:05:00'],
+    ['tracking_token'=>'GRL-2026-1026','subject'=>'Document processing inquiry','name'=>'Office Personnel','category'=>'administrative','priority'=>'medium','status'=>'unreviewed','created_at'=>'2026-07-26 08:40:00'],
+    ['tracking_token'=>'GRL-2026-1021','subject'=>'Assessment result clarification','name'=>'Student','category'=>'academic','priority'=>'low','status'=>'resolved','created_at'=>'2026-07-22 13:25:00'],
+];
+
+require_once 'includes/case_data.php';
+$allRecords = grail_case_records();
+
+$validStatuses = ['all','pending','unreviewed','under investigation','resolved'];
+$validCategories = ['all','harassment','discrimination','safety','academic','administrative','financial','technology','other'];
+$status = strtolower(trim((string)($_GET['status'] ?? 'all')));
+$category = strtolower(trim((string)($_GET['category'] ?? 'all')));
+$dateFrom = trim((string)($_GET['date_from'] ?? ''));
+$dateTo = trim((string)($_GET['date_to'] ?? ''));
+$includeNames = isset($_GET['include_names']) && $_GET['include_names'] === '1';
+if (!in_array($status, $validStatuses, true)) { $status = 'all'; }
+if (!in_array($category, $validCategories, true)) { $category = 'all'; }
+if ($dateFrom !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateFrom)) { $dateFrom = ''; }
+if ($dateTo !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateTo)) { $dateTo = ''; }
+
+$filteredRecords = array_values(array_filter($allRecords, static function(array $row) use ($status,$category,$dateFrom,$dateTo): bool {
+    $rowStatus = strtolower(trim((string)($row['status'] ?? 'pending')));
+    $rowCategory = strtolower(trim((string)($row['category'] ?? 'other')));
+    $rowDate = substr((string)($row['created_at'] ?? ''), 0, 10);
+    return ($status === 'all' || $rowStatus === $status)
+        && ($category === 'all' || $rowCategory === $category)
+        && ($dateFrom === '' || $rowDate >= $dateFrom)
+        && ($dateTo === '' || $rowDate <= $dateTo);
+}));
+
+if (($_GET['action'] ?? '') === 'csv') {
+    $fileName = 'grail-case-report-' . date('Y-m-d') . '.csv';
+    header('Content-Type: text/csv; charset=UTF-8');
+    header('Content-Disposition: attachment; filename="' . $fileName . '"');
+    $out = fopen('php://output', 'w');
+    fwrite($out, "\xEF\xBB\xBF");
+    $headings = ['Tracking ID','Submitted','Action deadline','Overdue','Category','Priority','Status','Subject'];
+    if ($includeNames) { $headings[] = 'Reporter'; }
+    fputcsv($out, $headings);
+    foreach ($filteredRecords as $row) {
+        $line = [$row['tracking_token'] ?? '', substr((string)($row['created_at'] ?? ''),0,10), substr((string)($row['deadline_at'] ?? ''),0,10), !empty($row['is_overdue']) ? 'Yes' : 'No', ucfirst((string)($row['category'] ?? 'other')), ucfirst((string)($row['priority'] ?? 'medium')), ucwords((string)($row['status'] ?? 'pending')), $row['subject'] ?? ''];
+        if ($includeNames) { $line[] = $row['name'] ?? ''; }
+        fputcsv($out, $line);
+    }
+    fclose($out); exit();
+}
+
+$total = count($filteredRecords);
+$resolved = count(array_filter($filteredRecords, static fn($r) => in_array(strtolower((string)($r['status'] ?? '')), ['resolved','completed','approved'], true)));
+$open = $total - $resolved;
+$highPriority = count(array_filter($filteredRecords, static fn($r) => in_array(strtolower((string)($r['priority'] ?? '')), ['high','critical'], true)));
+$overdue = count(array_filter($filteredRecords, static fn($r) => !empty($r['is_overdue'])));
+$resolutionRate = $total ? round(($resolved / $total) * 100, 1) : 0;
+$categoryCounts = [];
+foreach ($filteredRecords as $row) { $key = ucfirst(strtolower((string)($row['category'] ?? 'other'))); $categoryCounts[$key] = ($categoryCounts[$key] ?? 0) + 1; }
+arsort($categoryCounts);
+$topCategory = $categoryCounts ? array_key_first($categoryCounts) : 'None';
+$generatedAt = date('F j, Y \a\t g:i A');
+function e(string $value): string { return htmlspecialchars($value, ENT_QUOTES, 'UTF-8'); }
+function queryWith(array $changes): string { $query = array_merge($_GET, $changes); return '?' . http_build_query($query); }
 ?>
-
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>GRAIL System | Generate Reports</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 <style>
-  @keyframes fadeInUp {
-    from { opacity: 0; transform: translateY(15px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
-  .animate-header { animation: fadeInUp 0.7s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
-  .animate-body { animation: fadeInUp 0.7s cubic-bezier(0.16, 1, 0.3, 1) 0.15s forwards; opacity: 0; }
+:root{--cream:#fff8ef;--yellow:#ffd449;--mint:#a7f3d0;--green:#548c2f;--deep-green:#104911;--border:rgba(84,140,47,.24)}*{box-sizing:border-box}body{min-height:100vh;margin:0;color:var(--deep-green);background:var(--cream);background-image:radial-gradient(circle at 0 12%,rgba(167,243,208,.45),transparent 28%),radial-gradient(circle at 100% 85%,rgba(84,140,47,.15),transparent 30%);font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;font-size:17px;line-height:1.6}
+.sidebar{position:fixed;inset:0 auto 0 0;z-index:1030;width:285px;height:100vh;padding:30px 18px;overflow-y:auto;color:var(--cream);background:var(--deep-green);box-shadow:10px 0 26px rgba(16,73,17,.13)}.brand{display:flex;align-items:center;gap:11px;padding:4px 12px 24px;margin-bottom:22px;color:var(--cream);border-bottom:1px solid rgba(255,248,239,.16);text-decoration:none;font-size:1.4rem}.brand i{color:var(--yellow)}.sidebar-user{display:flex;align-items:center;gap:12px;padding:14px;margin-bottom:28px;background:rgba(167,243,208,.12);border:1px solid rgba(167,243,208,.18);border-radius:14px}.sidebar-user i{color:var(--yellow);font-size:2rem}.user-name{overflow:hidden;font-weight:750;line-height:1.2;text-overflow:ellipsis;white-space:nowrap}.user-role{color:var(--mint);font-size:.78rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase}.side-label{padding:0 16px;margin-bottom:16px;color:var(--mint);font-size:.85rem;font-weight:800;letter-spacing:.11em;text-transform:uppercase}.side-link{display:flex;align-items:center;gap:14px;min-height:56px;padding:14px 17px;margin-bottom:7px;color:rgba(255,248,239,.86);border-radius:13px;text-decoration:none;font-size:1.05rem;font-weight:650}.side-link i{width:24px;text-align:center}.side-link:hover{color:var(--cream);background:rgba(167,243,208,.12)}.side-link.active{color:var(--deep-green);background:var(--mint)}.logout,.logout:hover{color:var(--deep-green);background:var(--yellow)}
+.content{min-width:0;margin-left:285px;padding:clamp(24px,3vw,48px)}.hero,.panel,.stat{background:var(--cream);border:1px solid var(--border);box-shadow:0 10px 28px rgba(16,73,17,.08)}.hero{position:relative;overflow:hidden;padding:clamp(30px,5vw,50px);border-radius:26px}.hero:after{content:"";position:absolute;right:-70px;top:-110px;width:280px;height:280px;border-radius:50%;background:var(--mint);opacity:.55}.hero-inner{position:relative;z-index:1}.eyebrow{display:inline-flex;align-items:center;gap:8px;padding:8px 14px;background:var(--mint);border-radius:999px;font-size:.9rem;font-weight:800;text-transform:uppercase;letter-spacing:.05em}.hero h1{font-size:clamp(2.1rem,4vw,3.15rem);letter-spacing:-.035em}.hero p{max-width:760px;opacity:.78}.panel{padding:clamp(22px,3vw,32px);border-radius:20px}.panel-title{font-size:1.4rem;font-weight:800}.form-label{font-size:.82rem;font-weight:800;letter-spacing:.04em;text-transform:uppercase}.form-control,.form-select{min-height:50px;color:var(--deep-green);background:#fffdf8;border:1px solid rgba(84,140,47,.35);border-radius:11px}.form-check-input:checked{background-color:var(--green);border-color:var(--green)}.privacy-note{padding:14px;background:rgba(167,243,208,.28);border-radius:11px;font-size:.9rem}.btn-generate,.btn-export{min-height:50px;border-radius:11px;font-weight:800}.btn-generate{color:var(--cream);background:var(--green);border-color:var(--green)}.btn-generate:hover{color:var(--cream);background:var(--deep-green)}.btn-export{color:var(--deep-green);background:var(--yellow);border-color:var(--yellow)}.stat{height:100%;padding:22px;border-radius:17px}.stat-label{font-size:.78rem;font-weight:800;text-transform:uppercase;letter-spacing:.04em;opacity:.68}.stat-value{font-size:2rem;font-weight:850}.stat i{color:var(--green);font-size:1.4rem}.report-head{padding-bottom:18px;border-bottom:1px solid var(--border)}.report-meta{font-size:.87rem;opacity:.7}.insight{padding:18px;color:var(--cream);background:var(--deep-green);border-radius:14px}.insight p{color:var(--mint)}.table{--bs-table-bg:transparent;color:var(--deep-green);font-size:.91rem}.table th{padding:14px;background:rgba(167,243,208,.3);border-color:var(--border);font-size:.76rem;text-transform:uppercase;white-space:nowrap}.table td{padding:14px;border-color:rgba(84,140,47,.14);vertical-align:middle}.badge-soft{display:inline-flex;padding:6px 9px;background:rgba(167,243,208,.35);border-radius:999px;font-size:.78rem;font-weight:800}.empty{padding:35px;text-align:center}.print-only{display:none}
+@media(max-width:991.98px){.sidebar{width:88px;padding:24px 12px}.brand{justify-content:center;padding-inline:0}.brand span,.user-details,.side-label,.link-text{display:none}.sidebar-user{justify-content:center}.side-link{justify-content:center;gap:0}.side-link i{width:auto}.content{margin-left:88px;padding:22px}}@media(max-width:575.98px){.hero{border-radius:20px}.action-row .btn{width:100%}}
+@media print{@page{size:A4 portrait;margin:14mm}*{box-shadow:none!important}body{background:#fff!important;color:#1d3320!important;font:9.5pt/1.4 Arial,sans-serif}.sidebar,.filters-panel,.screen-only{display:none!important}.print-only{display:block!important}.content{margin:0!important;padding:0!important}.hero{padding:0 0 5mm!important;margin:0 0 5mm!important;border:0!important;border-bottom:2px solid #104911!important;border-radius:0!important}.hero:after,.eyebrow{display:none!important}.hero h1{font-size:21pt!important;margin-bottom:1mm!important}.hero p{margin:0!important;max-width:none!important;opacity:1!important}.panel{padding:4mm!important;border:1px solid #aab8ac!important;border-radius:2mm!important;break-inside:avoid}.summary-stats{display:grid!important;grid-template-columns:repeat(4,1fr)!important;gap:3mm!important}.summary-stats>[class*=col]{width:auto!important;padding:0!important}.stat{padding:3mm!important;background:#f3f7f3!important;border:1px solid #bdc9be!important}.stat-value{font-size:17pt!important}.insight{color:#17351b!important;background:#edf4ee!important;border-left:3px solid #548c2f!important;print-color-adjust:exact;-webkit-print-color-adjust:exact}.insight p{color:#17351b!important}.table{font-size:7.5pt!important}.table th,.table td{padding:2mm!important}.table thead{display:table-header-group}.table tr{break-inside:avoid}.report-meta{opacity:1!important}.panel-title{font-size:12pt!important}}
+</style></head><body><div class="layout">
+<aside class="sidebar d-flex flex-column"><a class="brand fw-bold" href="index.php"><i class="fa-solid fa-shield-halved"></i><span>GRAIL SYSTEM</span></a><div class="sidebar-user"><i class="fa-solid fa-circle-user"></i><div class="user-details"><div class="user-name"><?= e($userDisplayName) ?></div><div class="user-role">Administrator</div></div></div><div class="side-label">Workspace</div><nav aria-label="Dashboard navigation"><a class="side-link" href="dashboard.php"><i class="fa-solid fa-gauge"></i><span class="link-text">Dashboard</span></a><a class="side-link" href="reports.php"><i class="fa-solid fa-chart-pie"></i><span class="link-text">Reports</span></a><a class="side-link" href="records.php"><i class="fa-solid fa-folder-open"></i><span class="link-text">Records</span></a><a class="side-link" href="analytics.php"><i class="fa-solid fa-chart-line"></i><span class="link-text">Analytics</span></a><a class="side-link active" href="generate_reports.php" aria-current="page"><i class="fa-solid fa-file-export"></i><span class="link-text">Generate Report</span></a></nav><div class="mt-auto"><a class="side-link logout" href="logout.php"><i class="fa-solid fa-right-from-bracket"></i><span class="link-text">Logout</span></a></div></aside>
+<main class="content"><header class="hero mb-4"><div class="hero-inner"><span class="eyebrow mb-3"><i class="fa-solid fa-file-shield"></i>Reporting center</span><h1 class="fw-bold mb-2">Generate Case Report</h1><p class="mb-1">Choose which cases to include, then preview, print, or download the report.</p><div class="print-only report-meta">Prepared by <?= e($userDisplayName) ?> · Generated <?= e($generatedAt) ?></div></div></header>
 
-  .report-glass-card {
-    background: #ffffff !important;
-    border: 1px solid #e2e8f0 !important;
-    border-radius: 16px !important;
-    box-shadow: 0 4px 14px rgba(148, 163, 184, 0.04) !important;
-  }
+<section class="panel filters-panel mb-4" aria-labelledby="filters-title"><h2 id="filters-title" class="panel-title mb-1"><i class="fa-solid fa-sliders me-2"></i>Choose Cases to Include</h2><p class="mb-4 opacity-75">Leave a filter set to “All” or leave a date blank to include every matching case.</p><form method="get" action="generate_reports.php"><input type="hidden" name="live" value="<?= $liveMode ? '1' : '0' ?>"><div class="row g-3"><div class="col-md-6"><label class="form-label" for="status">Case status</label><select class="form-select" id="status" name="status"><?php foreach($validStatuses as $option): ?><option value="<?= e($option) ?>" <?= $status===$option?'selected':'' ?>><?= e(ucwords($option)) ?></option><?php endforeach; ?></select></div><div class="col-md-6"><label class="form-label" for="category">Case category</label><select class="form-select" id="category" name="category"><?php foreach($validCategories as $option): ?><option value="<?= e($option) ?>" <?= $category===$option?'selected':'' ?>><?= e(ucfirst($option)) ?></option><?php endforeach; ?></select></div><div class="col-md-4"><label class="form-label" for="dateFrom">Starting date</label><input class="form-control" id="dateFrom" type="date" name="date_from" value="<?= e($dateFrom) ?>"></div><div class="col-md-4"><label class="form-label" for="dateTo">Ending date</label><input class="form-control" id="dateTo" type="date" name="date_to" value="<?= e($dateTo) ?>"></div><div class="col-md-4 d-flex align-items-end"><div class="form-check mb-2"><input class="form-check-input" id="includeNames" type="checkbox" name="include_names" value="1" <?= $includeNames?'checked':'' ?>><label class="form-check-label fw-bold" for="includeNames">Show reporter names</label></div></div></div><div class="privacy-note my-3"><i class="fa-solid fa-user-shield me-2"></i>Reporter names are hidden unless you select “Show reporter names.” Only include them for authorized internal use.</div><button class="btn btn-generate px-4" type="submit"><i class="fa-solid fa-rotate me-2"></i>Update report</button></form></section>
 
-  .form-select {
-    background-color: #ffffff !important;
-    border: 1px solid #cbd5e1 !important;
-    border-radius: 8px !important;
-    padding: 10px 14px;
-    font-size: 0.9rem;
-    transition: all 0.2s ease-in-out !important;
-  }
-  .form-select:focus {
-    border-color: #1f6b3e !important;
-    box-shadow: 0 0 0 3px rgba(31, 107, 62, 0.15) !important;
-    outline: none;
-  }
-
-  .btn-premium-solid {
-    background: #1f6b3e;
-    color: #ffffff !important;
-    font-weight: 550;
-    font-size: 0.9rem;
-    border-radius: 8px;
-    border: none;
-    transition: all 0.25s ease;
-  }
-  .btn-premium-solid:hover {
-    background: #17522f;
-    box-shadow: 0 4px 12px rgba(31, 107, 62, 0.2);
-  }
-</style>
-
-<div class="container py-5">
-    <div class="text-center mb-5 animate-header">
-        <h1 class="fw-bold" style="color: #1a202c; font-size: 2.3rem; letter-spacing: -0.5px;">Reporting Tools</h1>
-        <p class="lead text-muted" style="font-size: 0.95rem; color: #718096 !important;">Compile and export structured data logs regarding incident lifecycle resolutions for audit reporting.</p>
-        <div class="mx-auto rounded mt-3" style="width: 30px; height: 3px; background-color: #1f6b3e;"></div>
-    </div>
-
-    <div class="row justify-content-center animate-body">
-        <div class="col-lg-8">
-            <div class="card report-glass-card p-4">
-                <div class="card-body p-1">
-                    <h5 class="fw-bold text-dark mb-4" style="font-size: 1.1rem;">Configure Report Export Parameters</h5>
-                    
-                    <form action="#" method="POST">
-                        <div class="row g-3">
-                            <div class="col-md-6">
-                                <label class="small fw-bold text-muted mb-2 d-block">Report Scope / Timeframe</label>
-                                <select class="form-select" required>
-                                    <option value="current_month">Current Billing / Month Period</option>
-                                    <option value="last_quarter">Previous Financial Quarter</option>
-                                    <option value="annual">Full System Year Summary</option>
-                                </select>
-                            </div>
-                            <div class="col-md-6">
-                                <label class="small fw-bold text-muted mb-2 d-block">Output File Architecture Type</label>
-                                <select class="form-select" required>
-                                    <option value="pdf">Structured PDF Document Print</option>
-                                    <option value="csv">Raw Microsoft Excel CSV Matrix</option>
-                                </select>
-                            </div>
-                            <div class="col-12 mt-4 text-center">
-                                <button type="submit" class="btn btn-premium-solid px-4 py-2">
-                                    <i class="fas fa-file-export me-2"></i> Compile and Export File
-                                </button>
-                            </div>
-                        </div>
-                    </form>
-
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<?php require_once 'includes/footer.php'; ?>
+<section class="report-output" aria-labelledby="report-title"><div class="panel mb-4"><div class="report-head d-flex flex-wrap justify-content-between gap-3 mb-4"><div><h2 id="report-title" class="panel-title mb-1">Case Report</h2><div class="report-meta"><?= $dateFrom?e(date('M j, Y',strtotime($dateFrom))):'All available dates' ?><?= $dateTo?' – '.e(date('M j, Y',strtotime($dateTo))):'' ?> · <?= e(ucwords($status)) ?> statuses · <?= e(ucfirst($category)) ?> categories</div></div><div class="action-row d-flex flex-wrap gap-2 screen-only"><button class="btn btn-export px-3" onclick="window.print()"><i class="fa-solid fa-file-pdf me-2"></i>Print / Save PDF</button><a class="btn btn-generate px-3" href="<?= e(queryWith(['action'=>'csv'])) ?>"><i class="fa-solid fa-file-csv me-2"></i>Download CSV</a></div></div>
+<div class="summary-stats row g-3 mb-4"><div class="col-6 col-xl-3"><div class="stat"><div class="stat-label">Included cases</div><div class="stat-value"><?= $total ?></div></div></div><div class="col-6 col-xl-3"><div class="stat"><div class="stat-label">Resolved</div><div class="stat-value"><?= $resolved ?></div></div></div><div class="col-6 col-xl-3"><div class="stat"><div class="stat-label">Open cases</div><div class="stat-value"><?= $open ?></div></div></div><div class="col-6 col-xl-3"><div class="stat"><div class="stat-label">Resolution rate</div><div class="stat-value"><?= $resolutionRate ?>%</div></div></div></div>
+<div class="insight mb-4"><h3 class="h5 fw-bold mb-2"><i class="fa-solid fa-lightbulb me-2"></i>Report summary</h3><p class="mb-0"><?= $total ? '<strong>'.e($topCategory).'</strong> is the most reported category in this selection. <strong>'.$open.'</strong> case'.($open===1?' remains':'s remain').' open, including <strong>'.$highPriority.'</strong> high-priority case'.($highPriority===1?'':'s').'.' : 'No cases match the selected filters. Try changing the dates, status, or category.' ?></p></div>
+<div class="table-responsive"><table class="table mb-0"><thead><tr><th>Tracking ID</th><th>Date</th><th>Category</th><th>Priority</th><th>Status</th><th>Subject</th><?php if($includeNames): ?><th>Reporter</th><?php endif; ?></tr></thead><tbody><?php if(!$filteredRecords): ?><tr><td colspan="<?= $includeNames?7:6 ?>"><div class="empty"><i class="fa-solid fa-filter-circle-xmark fa-2x mb-2"></i><div class="fw-bold">No matching records</div></div></td></tr><?php endif; ?><?php foreach($filteredRecords as $row): ?><tr><td class="fw-bold"><?= e((string)($row['tracking_token']??'')) ?></td><td><?= e(date('M j, Y',strtotime((string)$row['created_at']))) ?></td><td><?= e(ucfirst((string)($row['category']??'other'))) ?></td><td><span class="badge-soft"><?= e(ucfirst((string)($row['priority']??'medium'))) ?></span></td><td><?= e(ucwords((string)($row['status']??'pending'))) ?></td><td><?= e((string)($row['subject']??'')) ?></td><?php if($includeNames): ?><td><?= e((string)($row['name']??'')) ?></td><?php endif; ?></tr><?php endforeach; ?></tbody></table></div></div></section>
+</main></div></body></html>
