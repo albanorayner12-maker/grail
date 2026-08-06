@@ -1,6 +1,6 @@
 <div class="row g-3 mb-4">
     <div class="col-md-4">
-        <a href="incidents.php" class="text-decoration-none">
+        <a href="records.php" class="text-decoration-none">
             <div class="card bg-white border-0 shadow-sm p-3 border-start border-primary border-4 card-hover">
                 <div class="d-flex justify-content-between align-items-center">
                     <div>
@@ -14,7 +14,7 @@
     </div>
 
     <div class="col-md-4">
-        <a href="incidents.php?status=Pending" class="text-decoration-none">
+        <a href="records.php?status=pending" class="text-decoration-none">
             <div class="card bg-white border-0 shadow-sm p-3 border-start border-warning border-4 card-hover">
                 <div class="d-flex justify-content-between align-items-center">
                     <div>
@@ -28,7 +28,7 @@
     </div>
 
     <div class="col-md-4">
-        <a href="incidents.php?status=Resolved" class="text-decoration-none">
+        <a href="records.php?status=resolved" class="text-decoration-none">
             <div class="card bg-white border-0 shadow-sm p-3 border-start border-success border-4 card-hover">
                 <div class="d-flex justify-content-between align-items-center">
                     <div>
