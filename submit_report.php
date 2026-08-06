@@ -1,387 +1,415 @@
 <?php
-session_start();
-require_once 'db.php'; // Siguraduhing tama ang path ng iyong pdo db connection
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
 
-// Generate CSRF token for security
 if (empty($_SESSION['csrf_token'])) {
     $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
 }
 
-// Check if we need to display the Pop-up UI
-$show_thank_you_popup = false;
-$generated_token_display = '';
-$was_submission_anonymous = false;
+$error = $_SESSION['report_form_error'] ?? '';
+unset($_SESSION['report_form_error']);
+$old = $_SESSION['report_form_old'] ?? [];
+unset($_SESSION['report_form_old']);
 
-if (isset($_SESSION['trigger_thank_you']) && $_SESSION['trigger_thank_you'] === true) {
-    $show_thank_you_popup = true;
-    $generated_token_display = $_SESSION['last_generated_token'] ?? '';
-    $was_submission_anonymous = $_SESSION['last_submission_anonymous'] ?? false;
-    
-    // Clear it instantly so it won't loop on refresh
-    unset($_SESSION['trigger_thank_you']);
-    unset($_SESSION['last_generated_token']);
-    unset($_SESSION['last_submission_anonymous']);
-}
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $old = $_POST;
+    $csrfToken = (string) ($_POST['csrf_token'] ?? '');
 
-// ========================================================
-// BACKEND LOGIC: TATAKBO ITO KAPAG PININDOT ANG SUBMIT BUTTON
-// ========================================================
-if ($_SERVER["REQUEST_METHOD"] == "POST") {
-    
-    // 1. I-verify ang CSRF Token laban sa form manipulation
-    if (!isset($_POST['csrf_token']) || $_POST['csrf_token'] !== $_SESSION['csrf_token']) {
-        $_SESSION['error'] = "Security validation failed. Invalid CSRF token.";
-        header("Location: submit_report.php");
-        exit();
-    }
-
-    // 2. Kuhanin at linisin ang mga data mula sa inputs
-    $is_anonymous = isset($_POST['is_anonymous']) ? 1 : 0;
-    
-    // Kung anonymous, i-save natin bilang "Anonymous", kung hindi, kuhanin ang tinype niya
-    $reporter_name = $is_anonymous ? "Anonymous" : trim($_POST['reporter_name']);
-    $reporter_email = $is_anonymous ? null : trim($_POST['reporter_email']);
-    $reporter_phone = $is_anonymous ? null : trim($_POST['reporter_phone']);
-    $user_type = $is_anonymous ? "Other" : $_POST['user_type'];
-    $reporter_id = $is_anonymous ? null : trim($_POST['reporter_id']);
-    
-    $category = $_POST['category'];
-    $subject = trim($_POST['subject']);
-    $incident_date = !empty($_POST['incident_date']) ? $_POST['incident_date'] : date('Y-m-d');
-    $priority = $_POST['priority'];
-    $incident_location = trim($_POST['incident_location']);
-    $description = trim($_POST['description']);
-    $status = 'Pending'; // Default state para sa dashboard pipeline
-    
-    // GENERATE UNIQUE TRACKING TOKEN
-    $token_segment_1 = strtoupper(bin2hex(random_bytes(2))); 
-    $token_segment_2 = strtoupper(bin2hex(random_bytes(2))); 
-    $tracking_token = "GRL-" . $token_segment_1 . "-" . $token_segment_2;
-
-    $evidence_path = null;
-
-    // 3. Simple Validation para sa mga Required Fields
-    if (empty($subject) || empty($description) || empty($category)) {
-        $_SESSION['error'] = "Please fill in all required fields.";
+    if (!hash_equals($_SESSION['csrf_token'], $csrfToken)) {
+        $error = 'Your form session expired. Please refresh the page and try again.';
     } else {
-        try {
-            // 4. File Upload Handler para sa Supporting Evidence/Documents
-            if (isset($_FILES['evidence']) && $_FILES['evidence']['error'] == UPLOAD_ERR_OK) {
-                $upload_dir = 'uploads/';
-                if (!is_dir($upload_dir)) {
-                    mkdir($upload_dir, 0755, true);
-                }
-                
-                $file_extension = pathinfo($_FILES['evidence']['name'], PATHINFO_EXTENSION);
-                // Bigyan ng unique name ang file para walang kaparehas sa storage
-                $new_file_name = uniqid('evidence_', true) . '.' . $file_extension;
-                $target_file = $upload_dir . $new_file_name;
-                
-                if (move_uploaded_file($_FILES['evidence']['tmp_name'], $target_file)) {
-                    $evidence_path = $target_file;
-                }
-            }
+        $isAnonymous = isset($_POST['is_anonymous']);
+        $reporterName = $isAnonymous ? 'Anonymous' : trim((string) ($_POST['reporter_name'] ?? ''));
+        $reporterEmail = $isAnonymous ? null : trim((string) ($_POST['reporter_email'] ?? ''));
+        $reporterPhone = $isAnonymous ? null : trim((string) ($_POST['reporter_phone'] ?? ''));
+        $userType = $isAnonymous ? 'Anonymous' : trim((string) ($_POST['user_type'] ?? ''));
+        $reporterId = $isAnonymous ? null : trim((string) ($_POST['reporter_id'] ?? ''));
 
-            // 5. I-execute ang Secure SQL Query papunta sa grievances table (including the tracking token)
-            $sql = "INSERT INTO grievances (
-                        is_anonymous, name, email, phone, user_type, id_number, 
-                        category, subject, incident_date, priority, location, 
-                        description, evidence, status, tracking_token, created_at
-                    ) VALUES (
-                        :is_anonymous, :name, :email, :phone, :user_type, :id_number, 
-                        :category, :subject, :incident_date, :priority, :location, 
-                        :description, :evidence, :status, :tracking_token, NOW()
-                    )";
-            
-            $stmt = $pdo->prepare($sql);
-            $result = $stmt->execute([
-                'is_anonymous' => $is_anonymous,
-                'name' => $reporter_name,
-                'email' => $reporter_email,
-                'phone' => $reporter_phone,
-                'user_type' => $user_type,
-                'id_number' => $reporter_id,
-                'category' => $category,
-                'subject' => $subject,
-                'incident_date' => $incident_date,
-                'priority' => $priority,
-                'location' => $incident_location,
-                'description' => $description,
-                'evidence' => $evidence_path,
-                'status' => $status,
-                'tracking_token' => $tracking_token
-            ]);
+        $category = trim((string) ($_POST['category'] ?? ''));
+        $subject = trim((string) ($_POST['subject'] ?? ''));
+        $incidentDate = trim((string) ($_POST['incident_date'] ?? '')) ?: null;
+        $incidentLocation = trim((string) ($_POST['incident_location'] ?? ''));
+        $description = trim((string) ($_POST['description'] ?? ''));
+        $riskDanger = isset($_POST['risk_danger']);
+        $riskOngoing = isset($_POST['risk_ongoing']);
+        $riskRepeated = isset($_POST['risk_repeated']);
+        $riskRetaliation = isset($_POST['risk_retaliation']);
+        $riskMultiplePeople = isset($_POST['risk_multiple_people']);
+        $riskUrgent = isset($_POST['risk_urgent']);
+        $riskScore = ($riskDanger ? 4 : 0) + ($riskOngoing ? 2 : 0) + ($riskRepeated ? 1 : 0) + ($riskRetaliation ? 2 : 0) + ($riskMultiplePeople ? 1 : 0) + ($riskUrgent ? 3 : 0);
+        $suggestedPriority = ($riskDanger || $riskUrgent) ? 'critical' : ($riskScore >= 4 ? 'high' : ($riskScore >= 2 ? 'medium' : 'low'));
 
-            if ($result) {
-                // SUCCESS LOGIC: Pass the token to session variables for display in our layout pop-up modal
-                $_SESSION['trigger_thank_you'] = true;
-                $_SESSION['last_generated_token'] = $tracking_token;
-                $_SESSION['last_submission_anonymous'] = (bool)$is_anonymous;
-                header("Location: submit_report.php");
+        $allowedCategories = ['harassment', 'discrimination', 'safety', 'academic', 'administrative', 'financial', 'technology', 'other'];
+        $allowedUserTypes = ['Student', 'Instructor', 'Staff', 'Other'];
+
+        if (!$isAnonymous && ($reporterName === '' || $reporterEmail === '' || $userType === '')) {
+            $error = 'Please provide your name, email address, and community role, or choose anonymous reporting.';
+        } elseif (!$isAnonymous && !filter_var($reporterEmail, FILTER_VALIDATE_EMAIL)) {
+            $error = 'Please enter a valid email address.';
+        } elseif (!$isAnonymous && !in_array($userType, $allowedUserTypes, true)) {
+            $error = 'Please select a valid community role.';
+        } elseif (!in_array($category, $allowedCategories, true)) {
+            $error = 'Please select a valid concern category.';
+        } elseif ($subject === '' || mb_strlen($subject) > 200) {
+            $error = 'Please provide a short subject of no more than 200 characters.';
+        } elseif (mb_strlen($description) < 20) {
+            $error = 'Please describe what happened using at least 20 characters.';
+        } elseif ($incidentDate !== null && $incidentDate > date('Y-m-d')) {
+            $error = 'The incident date cannot be in the future.';
+        }
+
+        $evidencePath = null;
+        $evidenceMetadata = null;
+
+        if ($error === '') {
+            try {
+                if (isset($_FILES['evidence']) && $_FILES['evidence']['error'] !== UPLOAD_ERR_NO_FILE) {
+                    if ($_FILES['evidence']['error'] !== UPLOAD_ERR_OK) {
+                        throw new RuntimeException('The supporting file could not be uploaded.');
+                    }
+
+                    if ((int) $_FILES['evidence']['size'] > 5 * 1024 * 1024) {
+                        throw new RuntimeException('The supporting file must be 5 MB or smaller.');
+                    }
+
+                    $allowedMimeTypes = [
+                        'application/pdf' => 'pdf',
+                        'image/jpeg' => 'jpg',
+                        'image/png' => 'png',
+                        'application/msword' => 'doc',
+                        'application/vnd.openxmlformats-officedocument.wordprocessingml.document' => 'docx',
+                    ];
+                    $fileInfo = new finfo(FILEINFO_MIME_TYPE);
+                    $mimeType = $fileInfo->file($_FILES['evidence']['tmp_name']);
+
+                    if (!isset($allowedMimeTypes[$mimeType])) {
+                        throw new RuntimeException('Use a PDF, JPG, PNG, DOC, or DOCX supporting file.');
+                    }
+
+                    $uploadDirectory = __DIR__ . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . 'evidence';
+                    if (!is_dir($uploadDirectory) && !mkdir($uploadDirectory, 0755, true) && !is_dir($uploadDirectory)) {
+                        throw new RuntimeException('The evidence storage folder is unavailable.');
+                    }
+
+                    $storedFileName = 'evidence_' . bin2hex(random_bytes(16)) . '.' . $allowedMimeTypes[$mimeType];
+                    $absoluteTarget = $uploadDirectory . DIRECTORY_SEPARATOR . $storedFileName;
+
+                    if (!move_uploaded_file($_FILES['evidence']['tmp_name'], $absoluteTarget)) {
+                        throw new RuntimeException('The supporting file could not be saved.');
+                    }
+
+                    $evidencePath = $storedFileName;
+                    $evidenceMetadata = [
+                        'stored_name'=>$storedFileName,
+                        'original_name'=>basename((string)$_FILES['evidence']['name']),
+                        'mime_type'=>$mimeType,
+                        'file_size'=>(int)$_FILES['evidence']['size'],
+                        'sha256'=>hash_file('sha256',$absoluteTarget),
+                    ];
+                }
+
+                require_once 'db.php';
+                require_once 'includes/case_service.php';
+                do {
+                    $trackingToken = 'GRL-' . date('Y') . '-' . strtoupper(bin2hex(random_bytes(2)));
+                    $tokenCheck = $pdo->prepare('SELECT COUNT(*) FROM grievances WHERE tracking_token = :token');
+                    $tokenCheck->execute(['token' => $trackingToken]);
+                } while ((int) $tokenCheck->fetchColumn() > 0);
+
+                $accessCode = (string) random_int(100000, 999999);
+                $slaHours = case_sla_hours($suggestedPriority);
+                $insert = $pdo->prepare(
+                    'INSERT INTO grievances
+                    (tracking_token, name, email, phone, user_type, id_number, is_anonymous, category, subject, incident_date, location, description, evidence, risk_danger, risk_ongoing, risk_repeated, risk_retaliation, risk_multiple_people, risk_urgent, risk_score, priority, status, access_code_hash, sla_hours, due_at, created_at)
+                    VALUES
+                    (:tracking_token, :name, :email, :phone, :user_type, :id_number, :is_anonymous, :category, :subject, :incident_date, :location, :description, :evidence, :risk_danger, :risk_ongoing, :risk_repeated, :risk_retaliation, :risk_multiple_people, :risk_urgent, :risk_score, :priority, :status, :access_code_hash, :sla_hours, DATE_ADD(NOW(),INTERVAL :sla_hours_due HOUR), NOW())'
+                );
+                $insert->execute([
+                    'tracking_token' => $trackingToken,
+                    'name' => $reporterName,
+                    'email' => $reporterEmail,
+                    'phone' => $reporterPhone,
+                    'user_type' => $userType,
+                    'id_number' => $reporterId,
+                    'is_anonymous' => $isAnonymous ? 1 : 0,
+                    'category' => $category,
+                    'subject' => $subject,
+                    'incident_date' => $incidentDate,
+                    'location' => $incidentLocation,
+                    'description' => $description,
+                    'evidence' => $evidencePath,
+                    'risk_danger' => $riskDanger ? 1 : 0,
+                    'risk_ongoing' => $riskOngoing ? 1 : 0,
+                    'risk_repeated' => $riskRepeated ? 1 : 0,
+                    'risk_retaliation' => $riskRetaliation ? 1 : 0,
+                    'risk_multiple_people' => $riskMultiplePeople ? 1 : 0,
+                    'risk_urgent' => $riskUrgent ? 1 : 0,
+                    'risk_score' => $riskScore,
+                    'priority' => $suggestedPriority,
+                    'status' => 'unreviewed',
+                    'access_code_hash' => password_hash($accessCode, PASSWORD_DEFAULT),
+                    'sla_hours' => $slaHours,
+                    'sla_hours_due' => $slaHours,
+                ]);
+
+                $caseDatabaseId=(int)$pdo->lastInsertId();
+                case_add_event($pdo,$caseDatabaseId,'submitted','Report submitted','The report was received and assigned a private Case ID.','reporter',null,$isAnonymous?'Anonymous reporter':$reporterName,true);
+                case_queue_notification($pdo,$caseDatabaseId,'admin',null,'New '.$suggestedPriority.' priority grievance','Case '.$trackingToken.' requires administrative triage.');
+                if ($evidenceMetadata) {
+                    $evidenceInsert=$pdo->prepare('INSERT INTO evidence_files (grievance_id,stored_name,original_name,mime_type,file_size,sha256,scan_status) VALUES (:case_id,:stored_name,:original_name,:mime_type,:file_size,:sha256,:scan_status)');
+                    $evidenceInsert->execute($evidenceMetadata+['case_id'=>$caseDatabaseId,'scan_status'=>'pending']);
+                }
+
+                $_SESSION['submitted_case_id'] = $trackingToken;
+                $_SESSION['submitted_case_anonymous'] = $isAnonymous;
+                $_SESSION['submitted_case_access_code'] = $accessCode;
+                $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+                unset($_SESSION['report_form_old']);
+                header('Location: thankyou.php');
                 exit();
-            } else {
-                $_SESSION['error'] = "Failed to submit report. Please try again.";
-            }
-
-        } catch (PDOException $e) {
-            $_SESSION['error'] = "Database Error: " . $e->getMessage();
+            } catch (Throwable $exception) {
+                if ($evidencePath !== null) {
+                    $uploadedFile = __DIR__ . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . 'evidence' . DIRECTORY_SEPARATOR . basename($evidencePath);
+                    if (is_file($uploadedFile)) {
+                        unlink($uploadedFile);
+                    }
+                }
+                $error = $exception instanceof RuntimeException
+                    ? $exception->getMessage()
+                    : 'The report could not be saved. Please try again or contact support.';            }
         }
     }
-    
-    // Kung may error sa validation, i-refresh ang page para ipakita ang error box
-    header("Location: submit_report.php");
-    exit();
+
+    if ($error !== '') {
+        $_SESSION['report_form_old'] = $old;
+        $_SESSION['report_form_error'] = $error;
+        header('Location: submit_report.php');
+        exit();
+    }
 }
 
-// Display error messages kung nag-reload ang form
-$error = $_SESSION['error'] ?? '';
-unset($_SESSION['error']);
+function old_value(array $old, string $key): string
+{
+    return htmlspecialchars((string) ($old[$key] ?? ''), ENT_QUOTES, 'UTF-8');
+}
+
+require_once 'includes/header.php';
 ?>
 
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GRAIL | Submit Report</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="assets/css/home.css">
-    
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; min-height: 100vh; display: flex; flex-direction: column; }
-        .top-header { background-color: #ffffff; padding: 15px 40px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #e0e0e0; }
-        .location-text { display: flex; align-items: center; gap: 10px; text-align: right; }
-        .location-pin { color: #f4105c; font-size: 20px; }
-        .location-text span { color: #1c1c1c; font-size: 16px; }
-        .sub-nav { background-color: #053d15f6; padding: 12px 40px; }
-        .back-btn { color: #ffffff; text-decoration: none; font-weight: 600; font-size: 16px; display: inline-flex; align-items: center; gap: 8px; transition: 0.3s; }
-        .back-btn:hover { color: #a5d6a7; }
-        .report-container { flex: 1; background-color: #2e7d32; display: flex; align-items: center; justify-content: center; padding: 40px 20px; }
-        .report-card { background-color: #f5f5f5; width: 100%; max-width: 650px; border-radius: 20px; padding: 50px 40px; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2); }
-        .report-title { text-align: center; font-size: 32px; font-weight: 700; color: #333; margin-bottom: 40px; }
-        .form-group { margin-bottom: 25px; }
-        .form-group label { display: block; color: #2e7d32; font-weight: 600; font-size: 15px; margin-bottom: 8px; }
-        .form-input { width: 100%; padding: 12px 5px; border: none; border-bottom: 2px solid #2e7d32; background: transparent; font-size: 16px; color: #333; outline: none; transition: 0.3s; }
-        .form-input:focus { border-bottom-color: #1b5e20; background-color: rgba(46, 125, 50, 0.05); }
-        .form-input::placeholder { color: #999; }
-        .form-select { width: 100%; padding: 12px 5px; border: none; border-bottom: 2px solid #2e7d32; background: transparent; font-size: 16px; color: #333; outline: none; cursor: pointer; }
-        .form-select:focus { border-bottom-color: #1b5e20; }
-        .form-textarea { width: 100%; padding: 12px 5px; border: none; border-bottom: 2px solid #2e7d32; background: transparent; font-size: 16px; color: #333; outline: none; resize: vertical; min-height: 100px; }
-        .form-textarea:focus { border-bottom-color: #1b5e20; background-color: rgba(46, 125, 50, 0.05); }
-        .form-file { width: 100%; padding: 10px 5px; border: none; border-bottom: 2px solid #2e7d32; background: transparent; font-size: 14px; color: #333; }
-        .submit-btn { width: 100%; padding: 15px; background-color: #2e7d32; color: #ffffff; border: none; border-radius: 30px; font-size: 18px; font-weight: 600; cursor: pointer; transition: 0.3s; margin-top: 20px; }
-        .submit-btn:hover { background-color: #1b5e20; transform: translateY(-2px); box-shadow: 0 5px 20px rgba(46, 125, 50, 0.4); }
-        .alert-custom { border-radius: 10px; margin-bottom: 20px; }
-        .anonymous-check { display: flex; align-items: center; gap: 10px; margin-bottom: 20px; }
-        .anonymous-check input { width: 18px; height: 18px; accent-color: #2e7d32; }
-        .anonymous-check label { color: #555; font-size: 14px; }
-        .confirm-check { display: flex; align-items: flex-start; gap: 10px; margin-top: 20px; }
-        .confirm-check input { width: 18px; height: 18px; margin-top: 4px; accent-color: #2e7d32; }
-        .confirm-check label { color: #555; font-size: 14px; }
-        .required-field::after { content: " *"; color: #d32f2f; }
-    </style>
-</head>
-<body>
+<style>
+  .report-page { max-width: 1040px; }
+  .report-hero { position: relative; overflow: hidden; padding: clamp(2rem,5vw,3.5rem); background: var(--cream); border: 1px solid rgba(84,140,47,.22); border-radius: 26px; box-shadow: 0 18px 45px rgba(16,73,17,.12); }
+  .report-hero::after { content: ""; position: absolute; width: 260px; height: 260px; right: -95px; top: -125px; border-radius: 50%; background: var(--mint); opacity: .48; }
+  .report-hero-content { position: relative; z-index: 1; }
+  .report-eyebrow { display: inline-flex; align-items: center; gap: .5rem; padding: .45rem .85rem; border-radius: 999px; color: var(--deep-green); background: var(--mint); font-size: .88rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+  .report-title { color: var(--deep-green); font-size: clamp(2.1rem,5vw,3.35rem); letter-spacing: -.035em; }
+  .report-intro { max-width: 720px; margin-inline: auto; color: var(--deep-green); font-size: clamp(1rem,2vw,1.15rem); line-height: 1.7; opacity: .78; }
+  .report-card { padding: clamp(1.35rem,4vw,2.5rem); background: var(--cream); border: 1px solid rgba(84,140,47,.22); border-radius: 20px; box-shadow: 0 10px 28px rgba(16,73,17,.08); }
+  .section-heading { display: flex; align-items: center; gap: .8rem; padding-bottom: .8rem; margin-bottom: 1.25rem; color: var(--deep-green); border-bottom: 1px solid rgba(84,140,47,.2); }
+  .section-heading i { width: 42px; height: 42px; display: grid; place-items: center; flex: 0 0 42px; background: var(--mint); border-radius: 50%; }
+  .form-label { color: var(--deep-green); font-weight: 700; }
+  .required::after { content: " *"; color: #b42318; }
+  .form-control, .form-select { min-height: 48px; color: var(--deep-green) !important; background: #fffdf8 !important; border: 1px solid rgba(84,140,47,.35) !important; border-radius: 11px !important; }
+  textarea.form-control { min-height: 150px; }
+  .form-control:focus, .form-select:focus { border-color: var(--green) !important; box-shadow: 0 0 0 .2rem rgba(84,140,47,.15) !important; }
+  .anonymous-option { padding: 1rem; background: rgba(167,243,208,.28); border: 1px solid rgba(84,140,47,.22); border-radius: 13px; }
+  .identity-fields { transition: opacity .2s ease; }
+  .identity-fields.is-disabled { opacity: .45; }
+  .privacy-note { padding: 1rem; color: var(--deep-green); background: rgba(255,212,73,.22); border-left: 4px solid var(--yellow); border-radius: 8px; }
+  .submit-report-btn { min-height: 54px; color: var(--cream); background: var(--green); border: 2px solid var(--green); border-radius: 12px; font-weight: 700; }
+  .submit-report-btn:hover { color: var(--cream); background: var(--deep-green); border-color: var(--deep-green); }
+  .risk-option { height: 100%; padding: 1rem; background: rgba(167,243,208,.14); border: 1px solid rgba(84,140,47,.22); border-radius: 12px; }
+  .risk-option .form-check-input { margin-top: .3rem; }
+  .risk-option .form-check-label { color: var(--deep-green); font-weight: 700; }
+  .concern-guide { padding: 1.1rem; background: rgba(167,243,208,.18); border: 1px solid rgba(84,140,47,.24); border-radius: 14px; }
+  .concern-guide summary { display: flex; align-items: center; gap: .65rem; color: var(--deep-green); font-weight: 800; cursor: pointer; list-style: none; }
+  .concern-guide summary::-webkit-details-marker { display: none; }
+  .concern-guide summary::after { content: "+"; margin-left: auto; font-size: 1.35rem; line-height: 1; }
+  .concern-guide[open] summary::after { content: "−"; }
+  .guide-item { height: 100%; padding: .85rem; background: #fffdf8; border-left: 3px solid var(--green); border-radius: 8px; }
+  .guide-item strong { display: block; color: var(--deep-green); margin-bottom: .15rem; }
+  .guide-item span { display: block; color: var(--deep-green); font-size: .88rem; line-height: 1.45; opacity: .75; }
+  .category-help { padding: .8rem 1rem; color: var(--deep-green); background: rgba(255,212,73,.22); border-radius: 9px; font-size: .9rem; }
+  @media (max-width: 575.98px) { .report-hero { border-radius: 20px; } }
+</style>
 
-    <header class="top-header">
-       <div class="container d-flex justify-content-between align-items-center">
-        <img src="assets/css/img/wword-removebg.png" alt="GRAIL" height="60">
-        <div class="location-text">
-            <i class="fas fa-map-marker-alt location-pin"></i>
-            <span>Quezon St., Bayombong, Nueva Vizcaya</span>
+<div class="container report-page py-4 py-md-5">
+  <header class="report-hero text-center mb-4">
+    <div class="report-hero-content">
+      <span class="report-eyebrow mb-3"><i class="fas fa-shield-halved"></i> Secure submission</span>
+      <h1 class="report-title fw-bold mb-3">Report a Concern</h1>
+      <p class="report-intro mb-0">Tell us what happened using the essential details below. After submission, you will receive a private Case ID for tracking progress.</p>
+    </div>
+  </header>
+
+  <?php if ($error !== ''): ?>
+    <div class="alert alert-danger" role="alert"><i class="fas fa-circle-exclamation me-2"></i><?= htmlspecialchars($error) ?></div>
+  <?php endif; ?>
+
+  <form action="submit_report.php" method="POST" enctype="multipart/form-data" id="grievanceForm" novalidate>
+    <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['csrf_token']) ?>">
+
+    <section class="report-card mb-4" aria-labelledby="identity-title">
+      <h2 id="identity-title" class="section-heading h4 fw-bold"><i class="fas fa-user-shield"></i>Your identity</h2>
+
+      <div class="form-check anonymous-option mb-4">
+        <input class="form-check-input" type="checkbox" id="anonymous" name="is_anonymous" value="1" <?= isset($old['is_anonymous']) ? 'checked' : '' ?>>
+        <label class="form-check-label fw-bold" for="anonymous">Submit anonymously</label>
+        <div class="small mt-1">Your identity and contact details will not be stored. Save the Case ID shown after submission because it is your only tracking reference.</div>
+      </div>
+
+      <div id="identityFields" class="identity-fields">
+        <div class="row g-3">
+          <div class="col-md-6">
+            <label for="reporter_name" class="form-label required">Full name</label>
+            <input id="reporter_name" name="reporter_name" type="text" class="form-control" maxlength="150" autocomplete="name" value="<?= old_value($old, 'reporter_name') ?>">
+          </div>
+          <div class="col-md-6">
+            <label for="reporter_email" class="form-label required">Email address</label>
+            <input id="reporter_email" name="reporter_email" type="email" class="form-control" maxlength="190" autocomplete="email" value="<?= old_value($old, 'reporter_email') ?>">
+            <div class="form-text">Used only if the case team needs clarification.</div>
+          </div>
+          <div class="col-md-6">
+            <label for="user_type" class="form-label required">Community role</label>
+            <select id="user_type" name="user_type" class="form-select">
+              <option value="">Select your role</option>
+              <?php foreach (['Student', 'Instructor', 'Staff', 'Other'] as $role): ?>
+                <option value="<?= $role ?>" <?= (($old['user_type'] ?? '') === $role) ? 'selected' : '' ?>><?= $role ?></option>
+              <?php endforeach; ?>
+            </select>
+          </div>
+          <div class="col-md-3">
+            <label for="reporter_id" class="form-label">ID number <span class="fw-normal">(optional)</span></label>
+            <input id="reporter_id" name="reporter_id" type="text" class="form-control" maxlength="50" value="<?= old_value($old, 'reporter_id') ?>">
+          </div>
+          <div class="col-md-3">
+            <label for="reporter_phone" class="form-label">Phone <span class="fw-normal">(optional)</span></label>
+            <input id="reporter_phone" name="reporter_phone" type="tel" class="form-control" maxlength="30" autocomplete="tel" value="<?= old_value($old, 'reporter_phone') ?>">
+          </div>
         </div>
-       </div>
-    </header>
+      </div>
+    </section>
 
-    <nav class="sub-nav">
-        <a href="index.php" class="back-btn">
-            <i class="fas fa-arrow-left"></i> Back
-        </a>
-    </nav>
-
-    <div class="report-container">
-        <div class="report-card">
-            
-            <h2 class="report-title">Report a Grievance</h2>
-
-            <?php if ($error): ?>
-                <div class="alert alert-danger alert-custom alert-dismissible fade show" role="alert">
-                    <?= htmlspecialchars($error) ?>
-                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-                </div>
-            <?php endif; ?>
-
-            <form action="submit_report.php" method="POST" enctype="multipart/form-data" id="grievanceForm">
-                
-                <input type="hidden" name="csrf_token" value="<?= $_SESSION['csrf_token'] ?>">
-
-                <div class="anonymous-check">
-                    <input type="checkbox" id="anonymous" name="is_anonymous" value="1">
-                    <label for="anonymous">Submit anonymously (hide my identity)</label>
-                </div>
-
-                <div id="contactSection">
-                    <div class="form-group">
-                        <label class="required-field">Full Name</label>
-                        <input type="text" class="form-input" id="reporter_name" name="reporter_name" placeholder="Enter your full name" required>
-                    </div>
-
-                    <div class="form-group">
-                        <label class="required-field">Email Address</label>
-                        <input type="email" class="form-input" id="reporter_email" name="reporter_email" placeholder="your@email.com" required>
-                    </div>
-
-                    <div class="form-group">
-                        <label class="required-field">Phone Number</label>
-                        <input type="tel" class="form-input" id="reporter_phone" name="reporter_phone" placeholder="+1234567890" required>
-                    </div>
-
-                    <div class="form-group">
-                         <label class="required-field">USER</label>
-                        <select class="form-select" id="user_type" name="user_type" required>
-                            <option value="" disabled selected>Select User Type</option>
-                            <option value="Instructor">Instructor</option>
-                            <option value="Student">Student</option>
-                            <option value="Other">Other</option>
-                        </select>
-                    </div>
-
-                    <div class="form-group">
-                        <label class="required-field">ID Number </label>
-                        <input type="text" class="form-input" id="reporter_id" name="reporter_id" placeholder="231-000" required>
-                    </div>
-                </div>
-             
-                <div class="form-group">
-                    <label class="required-field">Grievance Type</label>
-                    <select class="form-select" name="category" required>
-                        <option value="" disabled selected>Select Grievance Type</option>
-                        <option value="harassment">Harassment</option>
-                        <option value="discrimination">Discrimination</option>
-                        <option value="safety">Safety Concern</option>
-                        <option value="academic">Academic Issue</option>
-                        <option value="administrative">Administrative</option>
-                        <option value="financial">Financial</option>
-                        <option value="other">Other</option>
-                    </select>
-                </div>
-
-                <div class="form-group">
-                    <label class="required-field">Subject / Title</label>
-                    <input type="text" class="form-input" name="subject" required placeholder="Brief summary of the issue" maxlength="200">
-                </div>
-
-                <div class="row">
-                    <div class="col-md-6">
-                        <div class="form-group">
-                            <label>Date of Incident</label>
-                            <input type="date" class="form-input" name="incident_date" max="<?= date('Y-m-d') ?>">
-                        </div>
-                    </div>
-                    <div class="col-md-6">
-                        <div class="form-group">
-                            <label>Priority Level</label>
-                            <select class="form-select" name="priority">
-                                <option value="medium" selected>Medium</option>
-                                <option value="low">Low</option>
-                                <option value="high">High</option>
-                                <option value="critical">Critical</option>
-                            </select>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="form-group">
-                    <label>Location of Incident</label>
-                    <input type="text" class="form-input" name="incident_location" placeholder="Where did this occur?">
-                </div>
-
-                <div class="form-group">
-                    <label class="required-field">Description</label>
-                    <textarea class="form-textarea" name="description" rows="5" required placeholder="Please provide all relevant details..."></textarea>
-                </div>
-
-                <div class="form-group">
-                    <label>Upload Supporting File (Optional)</label>
-                    <input type="file" class="form-file" name="evidence" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx">
-                    <small style="color: #666; font-size: 12px;">Max size: 5MB. Allowed: PDF, Images, Word docs</small>
-                </div>
-
-                <div class="confirm-check">
-                    <input type="checkbox" required id="confirm">
-                    <label for="confirm">I confirm that the information provided is accurate to the best of my knowledge.</label>
-                </div>
-
-                <button type="submit" class="submit-btn">Submit Report</button>
-            </form>
+    <section class="report-card mb-4" aria-labelledby="incident-title">
+      <h2 id="incident-title" class="section-heading h4 fw-bold"><i class="fas fa-file-lines"></i>What happened</h2>
+      <details class="concern-guide mb-4">
+        <summary><i class="fas fa-circle-info"></i>Review the concern types before choosing</summary>
+        <p class="mt-3 mb-3" style="color:var(--deep-green);opacity:.76">Choose the category that best describes the main issue. Administrators can correct the classification during review if necessary.</p>
+        <div class="row g-2">
+          <div class="col-md-6"><div class="guide-item"><strong>Harassment</strong><span>Bullying, intimidation, unwanted conduct, threats, or behavior creating a hostile environment.</span></div></div>
+          <div class="col-md-6"><div class="guide-item"><strong>Discrimination</strong><span>Unfair treatment based on identity, disability, religion, gender, age, background, or another protected characteristic.</span></div></div>
+          <div class="col-md-6"><div class="guide-item"><strong>Safety concern</strong><span>Unsafe facilities, hazards, violence, health risks, dangerous equipment, or an immediate threat to wellbeing.</span></div></div>
+          <div class="col-md-6"><div class="guide-item"><strong>Academic issue</strong><span>Grades, assessment, instruction, classroom treatment, academic policy, scheduling, or learning-related concerns.</span></div></div>
+          <div class="col-md-6"><div class="guide-item"><strong>Administrative</strong><span>Delayed documents, enrollment, records, office procedures, staff service, or institutional process concerns.</span></div></div>
+          <div class="col-md-6"><div class="guide-item"><strong>Financial</strong><span>Fees, billing, refunds, scholarships, payments, financial assistance, or unexplained charges.</span></div></div>
+          <div class="col-md-6"><div class="guide-item"><strong>Technology</strong><span>Accounts, system access, data privacy, online platforms, connectivity, or institution-provided technology.</span></div></div>
+          <div class="col-md-6"><div class="guide-item"><strong>Other</strong><span>Use this only when none of the listed categories reasonably describes the main concern.</span></div></div>
         </div>
+      </details>
+      <div class="row g-3">
+        <div class="col-md-6">
+          <label for="category" class="form-label required">Concern category</label>
+          <select id="category" name="category" class="form-select" required>
+            <option value="">Select a category</option>
+            <?php
+              $categories = [
+                'harassment' => 'Harassment', 'discrimination' => 'Discrimination',
+                'safety' => 'Safety concern', 'academic' => 'Academic issue',
+                'administrative' => 'Administrative', 'financial' => 'Financial',
+                'technology' => 'Technology', 'other' => 'Other',
+              ];
+              foreach ($categories as $value => $label):
+            ?>
+              <option value="<?= $value ?>" <?= (($old['category'] ?? '') === $value) ? 'selected' : '' ?>><?= $label ?></option>
+            <?php endforeach; ?>
+          </select>
+          <div id="categoryHelp" class="category-help mt-2" aria-live="polite"><i class="fas fa-lightbulb me-2"></i>Select a category to see a short explanation.</div>
+        </div>
+        <div class="col-md-6">
+          <label for="incident_date" class="form-label">Incident date <span class="fw-normal">(if known)</span></label>
+          <input id="incident_date" name="incident_date" type="date" class="form-control" max="<?= date('Y-m-d') ?>" value="<?= old_value($old, 'incident_date') ?>">
+        </div>
+        <div class="col-12">
+          <label for="subject" class="form-label required">Short subject</label>
+          <input id="subject" name="subject" type="text" class="form-control" maxlength="200" required placeholder="Briefly summarize the concern" value="<?= old_value($old, 'subject') ?>">
+        </div>
+        <div class="col-12">
+          <label for="description" class="form-label required">Detailed description</label>
+          <textarea id="description" name="description" class="form-control" required minlength="20" placeholder="Describe what happened, who was involved, and any important context."><?= old_value($old, 'description') ?></textarea>
+          <div class="form-text">Include facts you remember. Avoid sharing passwords or unrelated sensitive information.</div>
+        </div>
+        <div class="col-12">
+          <label for="incident_location" class="form-label">Location <span class="fw-normal">(optional)</span></label>
+          <input id="incident_location" name="incident_location" type="text" class="form-control" maxlength="200" placeholder="Building, room, office, online platform, or other location" value="<?= old_value($old, 'incident_location') ?>">
+        </div>
+      </div>
+    </section>
+
+    <section class="report-card mb-4" aria-labelledby="risk-title">
+      <h2 id="risk-title" class="section-heading h4 fw-bold"><i class="fas fa-triangle-exclamation"></i>Urgency and safety check</h2>
+      <p class="mb-4" style="color:var(--deep-green);opacity:.78">Select every statement that applies. These structured answers create an initial priority suggestion; an administrator reviews and confirms it.</p>
+      <?php $riskQuestions=['risk_danger'=>'Is anyone currently in danger?','risk_ongoing'=>'Is the incident ongoing?','risk_repeated'=>'Has this happened repeatedly?','risk_retaliation'=>'Is there a threat of retaliation?','risk_multiple_people'=>'Does it affect multiple people?','risk_urgent'=>'Is urgent intervention required?']; ?>
+      <div class="row g-3"><?php foreach($riskQuestions as $name=>$label): ?><div class="col-md-6"><div class="risk-option form-check"><input class="form-check-input" type="checkbox" id="<?= $name ?>" name="<?= $name ?>" value="1" <?= isset($old[$name])?'checked':'' ?>><label class="form-check-label" for="<?= $name ?>"><?= htmlspecialchars($label) ?></label></div></div><?php endforeach; ?></div>
+      <div class="form-text mt-3">If someone is in immediate danger, contact the appropriate emergency service instead of waiting for this process.</div>
+    </section>
+
+    <section class="report-card mb-4" aria-labelledby="evidence-title">
+      <h2 id="evidence-title" class="section-heading h4 fw-bold"><i class="fas fa-paperclip"></i>Supporting evidence</h2>
+      <label for="evidence" class="form-label">Attach one file <span class="fw-normal">(optional)</span></label>
+      <input id="evidence" name="evidence" type="file" class="form-control" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx">
+      <div class="form-text">PDF, JPG, PNG, DOC, or DOCX; maximum 5 MB.</div>
+    </section>
+
+    <div class="privacy-note mb-4"><i class="fas fa-lock me-2"></i>Your report is submitted securely. Structured safety answers create an initial priority suggestion; an administrator must review and confirm or change it with an auditable reason.</div>
+
+    <div class="form-check mb-4">
+      <input class="form-check-input" type="checkbox" id="confirm" required>
+      <label class="form-check-label" for="confirm">I confirm that this report is accurate to the best of my knowledge.</label>
     </div>
 
-  <?php if ($show_thank_you_popup): ?>
-    <div id="thankYouOverlay" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 99999; display: flex; justify-content: center; align-items: center;">
-        <div style="background: white; padding: 40px 30px; border-radius: 20px; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,0.3); max-width: 460px; width: 90%; animation: fadeIn 0.3s ease-in-out;">
-            
-            <?php if ($was_submission_anonymous): ?>
-                <div style="font-size: 65px; color: #e67e22; margin-bottom: 15px;">
-                    <i class="fa-solid fa-user-secret"></i>
-                </div>
-                <h3 style="font-weight: 700; color: #333; margin-bottom: 10px; font-size: 24px;">Anonymous Report Logged</h3>
-                <p style="color: #666; margin-bottom: 20px; line-height: 1.5; font-size: 14px;">
-                    Your privacy is secure. Because you chose anonymity, you <strong>must save the secure token below</strong> to monitor progress or check updates later.
-                </p>
-                
-                <div style="display: flex; align-items: center; justify-content: center; background: #f8f9fa; border: 1px solid #cbd5e1; padding: 12px; border-radius: 10px; margin-bottom: 25px;">
-                    <code id="trackingTokenCode" style="font-size: 1.2rem; font-weight: 700; color: #1f6b3e; letter-spacing: 0.5px; margin-right: 15px; font-family: monospace;"><?= htmlspecialchars($generated_token_display) ?></code>
-                    <button class="btn btn-sm btn-outline-secondary" onclick="navigator.clipboard.writeText('<?= htmlspecialchars($generated_token_display) ?>'); alert('Tracking token copied to clipboard!');">
-                        <i class="fa-regular fa-copy"></i> Copy
-                    </button>
-                </div>
-            <?php else: ?>
-                <div style="font-size: 75px; color: #2e7d32; margin-bottom: 20px;">
-                    <i class="fa-solid fa-circle-check"></i>
-                </div>
-                <h3 style="font-weight: 700; color: #333; margin-bottom: 10px; font-size: 26px;">Submission Received!</h3>
-                <p style="color: #666; margin-bottom: 15px; line-height: 1.6; font-size: 15px;">Thank you for sending your report. The administration team will review your data promptly.</p>
-                <p style="color: #888; font-size: 13px; margin-bottom: 25px;">Your tracking number is: <strong><?= htmlspecialchars($generated_token_display) ?></strong></p>
-            <?php endif; ?>
-            
-            <a href="index.php" style="display: inline-block; background-color: #2e7d32; color: white; text-decoration: none; padding: 12px 35px; border-radius: 30px; font-weight: 600; font-size: 16px; box-shadow: 0 4px 15px rgba(46,125,50,0.3); transition: 0.2s; width: 100%;">
-                Dismiss to Home
-            </a>
-        </div>
-    </div>
-    <?php endif; ?>
+    <button type="submit" class="btn submit-report-btn w-100"><i class="fas fa-paper-plane me-2"></i>Submit Report and Generate Case ID</button>
+  </form>
+</div>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-    <script>
-        // Toggle contact fields and validation dynamically when anonymous is checked
-        document.getElementById('anonymous').addEventListener('change', function() {
-            const section = document.getElementById('contactSection');
-            const fields = [
-                document.getElementById('reporter_name'),
-                document.getElementById('reporter_email'),
-                document.getElementById('reporter_phone'),
-                document.getElementById('user_type'),
-                document.getElementById('reporter_id')
-            ];
-            
-            if (this.checked) {
-                section.style.opacity = '0.3';
-                fields.forEach(field => {
-                    field.required = false;
-                    field.disabled = true;
-                    field.value = ''; 
-                });
-            } else {
-                section.style.opacity = '1';
-                fields.forEach(field => {
-                    field.disabled = false;
-                    field.required = true;
-                });
-            }
-        });
-    </script>
-</body>
-</html>
+<script>
+  (() => {
+    const anonymous = document.getElementById('anonymous');
+    const identityFields = document.getElementById('identityFields');
+    const requiredIdentity = ['reporter_name', 'reporter_email', 'user_type'];
+    const allIdentity = [...requiredIdentity, 'reporter_id', 'reporter_phone'];
+
+    function updateIdentityFields() {
+      const hidden = anonymous.checked;
+      identityFields.classList.toggle('is-disabled', hidden);
+      allIdentity.forEach((id) => {
+        const field = document.getElementById(id);
+        field.disabled = hidden;
+        field.required = !hidden && requiredIdentity.includes(id);
+      });
+    }
+
+    anonymous.addEventListener('change', updateIdentityFields);
+    updateIdentityFields();
+
+    const category = document.getElementById('category');
+    const categoryHelp = document.getElementById('categoryHelp');
+    const categoryDescriptions = {
+      harassment: 'Choose Harassment for bullying, intimidation, threats, or other unwanted conduct.',
+      discrimination: 'Choose Discrimination for unfair treatment connected to identity or a protected characteristic.',
+      safety: 'Choose Safety concern for hazards, dangerous conditions, violence, or risks to health and wellbeing.',
+      academic: 'Choose Academic issue for grading, instruction, assessment, scheduling, or learning-related concerns.',
+      administrative: 'Choose Administrative for records, enrollment, document processing, office service, or institutional procedures.',
+      financial: 'Choose Financial for fees, billing, payments, refunds, scholarships, or financial assistance.',
+      technology: 'Choose Technology for accounts, access, privacy, connectivity, or institutional systems.',
+      other: 'Choose Other only when none of the available categories reasonably fits the main concern.'
+    };
+    function updateCategoryHelp() {
+      categoryHelp.innerHTML = '<i class="fas fa-lightbulb me-2"></i>' + (categoryDescriptions[category.value] || 'Select a category to see a short explanation.');
+    }
+    category.addEventListener('change', updateCategoryHelp);
+    updateCategoryHelp();
+  })();
+</script>
+
+<?php require_once 'includes/footer.php'; ?>
