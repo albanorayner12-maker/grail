@@ -94,7 +94,7 @@ require_once 'includes/header.php';
 
       <div class="mb-4">
         <label for="case_id" class="form-label">Case ID</label>
-        <input id="case_id" name="case_id" type="text" class="form-control form-control-lg" value="<?= htmlspecialchars($caseId) ?>" placeholder="GRL-A1B2-C3D4" autocomplete="off" required>
+        <input id="case_id" name="case_id" type="text" class="form-control form-control-lg" value="<?= htmlspecialchars($caseId) ?>" placeholder="ABC123" autocomplete="off" required>
         <div class="form-text">Your Case ID connects this response without asking you to disclose your identity.</div>
       </div>
 
