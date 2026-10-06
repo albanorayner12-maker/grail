@@ -111,11 +111,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 require_once 'db.php';
                 require_once 'includes/case_service.php';
-                do {
-                    $trackingToken = 'GRL-' . date('Y') . '-' . strtoupper(bin2hex(random_bytes(2)));
-                    $tokenCheck = $pdo->prepare('SELECT COUNT(*) FROM grievances WHERE tracking_token = :token');
-                    $tokenCheck->execute(['token' => $trackingToken]);
-                } while ((int) $tokenCheck->fetchColumn() > 0);
 
                 $accessCode = (string) random_int(100000, 999999);
                 $slaHours = case_sla_hours($suggestedPriority);
@@ -125,33 +120,51 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     VALUES
                     (:tracking_token, :name, :email, :phone, :user_type, :id_number, :is_anonymous, :category, :subject, :incident_date, :location, :description, :evidence, :risk_danger, :risk_ongoing, :risk_repeated, :risk_retaliation, :risk_multiple_people, :risk_urgent, :risk_score, :priority, :status, :access_code_hash, :sla_hours, DATE_ADD(NOW(),INTERVAL :sla_hours_due HOUR), NOW())'
                 );
-                $insert->execute([
-                    'tracking_token' => $trackingToken,
-                    'name' => $reporterName,
-                    'email' => $reporterEmail,
-                    'phone' => $reporterPhone,
-                    'user_type' => $userType,
-                    'id_number' => $reporterId,
-                    'is_anonymous' => $isAnonymous ? 1 : 0,
-                    'category' => $category,
-                    'subject' => $subject,
-                    'incident_date' => $incidentDate,
-                    'location' => $incidentLocation,
-                    'description' => $description,
-                    'evidence' => $evidencePath,
-                    'risk_danger' => $riskDanger ? 1 : 0,
-                    'risk_ongoing' => $riskOngoing ? 1 : 0,
-                    'risk_repeated' => $riskRepeated ? 1 : 0,
-                    'risk_retaliation' => $riskRetaliation ? 1 : 0,
-                    'risk_multiple_people' => $riskMultiplePeople ? 1 : 0,
-                    'risk_urgent' => $riskUrgent ? 1 : 0,
-                    'risk_score' => $riskScore,
-                    'priority' => $suggestedPriority,
-                    'status' => 'unreviewed',
-                    'access_code_hash' => password_hash($accessCode, PASSWORD_DEFAULT),
-                    'sla_hours' => $slaHours,
-                    'sla_hours_due' => $slaHours,
-                ]);
+
+                $trackingToken = '';
+                $inserted = false;
+                for ($attempt = 0; $attempt < 8; $attempt++) {
+                    $trackingToken = generate_tracking_token();
+                    try {
+                        $insert->execute([
+                            'tracking_token' => $trackingToken,
+                            'name' => $reporterName,
+                            'email' => $reporterEmail,
+                            'phone' => $reporterPhone,
+                            'user_type' => $userType,
+                            'id_number' => $reporterId,
+                            'is_anonymous' => $isAnonymous ? 1 : 0,
+                            'category' => $category,
+                            'subject' => $subject,
+                            'incident_date' => $incidentDate,
+                            'location' => $incidentLocation,
+                            'description' => $description,
+                            'evidence' => $evidencePath,
+                            'risk_danger' => $riskDanger ? 1 : 0,
+                            'risk_ongoing' => $riskOngoing ? 1 : 0,
+                            'risk_repeated' => $riskRepeated ? 1 : 0,
+                            'risk_retaliation' => $riskRetaliation ? 1 : 0,
+                            'risk_multiple_people' => $riskMultiplePeople ? 1 : 0,
+                            'risk_urgent' => $riskUrgent ? 1 : 0,
+                            'risk_score' => $riskScore,
+                            'priority' => $suggestedPriority,
+                            'status' => 'unreviewed',
+                            'access_code_hash' => password_hash($accessCode, PASSWORD_DEFAULT),
+                            'sla_hours' => $slaHours,
+                            'sla_hours_due' => $slaHours,
+                        ]);
+                        $inserted = true;
+                        break;
+                    } catch (PDOException $exception) {
+                        if ($exception->errorInfo[1] ?? null !== 1062) {
+                            throw $exception;
+                        }
+                    }
+                }
+
+                if (!$inserted) {
+                    throw new RuntimeException('Unable to generate a unique case ID. Please try again.');
+                }
 
                 $caseDatabaseId=(int)$pdo->lastInsertId();
                 case_add_event($pdo,$caseDatabaseId,'submitted','Report submitted','The report was received and assigned a private Case ID.','reporter',null,$isAnonymous?'Anonymous reporter':$reporterName,true);
@@ -187,6 +200,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         header('Location: submit_report.php');
         exit();
     }
+}
+
+function generate_tracking_token(): string
+{
+    $letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    $digits = '0123456789';
+    $token = '';
+
+    for ($i = 0; $i < 3; $i++) {
+        $token .= $letters[random_int(0, strlen($letters) - 1)];
+    }
+
+    for ($i = 0; $i < 3; $i++) {
+        $token .= $digits[random_int(0, strlen($digits) - 1)];
+    }
+
+    return $token;
 }
 
 function old_value(array $old, string $key): string
