@@ -1,8 +1,19 @@
 <?php
 if (session_status() === PHP_SESSION_NONE) { session_start(); }
+
+// Never let the browser cache or restore this page (Back button, bfcache, history).
+header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+header('Pragma: no-cache');
+header('Expires: 0');
+
+// The dashboard (including preview mode) is for signed-in administrators only.
+if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== true) {
+    header('Location: login.php');
+    exit();
+}
 if (empty($_SESSION['csrf_token'])) { $_SESSION['csrf_token'] = bin2hex(random_bytes(32)); }
 
-$preview_mode = !isset($_SESSION['admin_logged_in']) || !empty($_SESSION['admin_preview']) || (isset($_GET['preview']) && $_GET['preview'] === '1');
+$preview_mode = !empty($_SESSION['admin_preview']) || (isset($_GET['preview']) && $_GET['preview'] === '1');
 $user_display_name = trim((string) ($_SESSION['admin_name'] ?? $_SESSION['user_name'] ?? $_SESSION['admin_username'] ?? ''));
 $is_guest_preview = $user_display_name === '';
 if ($is_guest_preview) { $user_display_name = 'Preview User'; }
@@ -453,6 +464,60 @@ function status_meta(string $status): array {
     @media (prefers-reduced-motion: reduce) {
         * { transition-duration: 0.01ms !important; }
     }
+
+    /* GRAIL dashboard motion */
+    @keyframes grailFadeUp {
+        from { opacity: 0; transform: translateY(22px); }
+        to   { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes grailSidebarIn {
+        from { opacity: 0; transform: translateX(-18px); }
+        to   { opacity: 1; transform: translateX(0); }
+    }
+    @keyframes grailSoftGlow {
+        0%, 100% { box-shadow: 0 8px 22px rgba(16, 73, 17, 0.07); }
+        50%      { box-shadow: 0 12px 28px rgba(84, 140, 47, 0.15); }
+    }
+    .sidebar { animation: grailSidebarIn .55s ease-out both; }
+    .content > .hero { animation: grailFadeUp .65s cubic-bezier(.2,.75,.25,1) both; }
+    .content > .overdue-alert { animation: grailFadeUp .55s ease-out .08s both; }
+    .content > section[aria-label="Statistics"] .stat-card {
+        animation: grailFadeUp .55s ease-out both;
+    }
+    .content > section[aria-label="Statistics"] .col-sm-6:nth-child(1) .stat-card { animation-delay: .08s; }
+    .content > section[aria-label="Statistics"] .col-sm-6:nth-child(2) .stat-card { animation-delay: .16s; }
+    .content > section[aria-label="Statistics"] .col-sm-6:nth-child(3) .stat-card { animation-delay: .24s; }
+    .content > section[aria-label="Statistics"] .col-sm-6:nth-child(4) .stat-card { animation-delay: .32s; }
+    .content > .panel { animation: grailFadeUp .65s ease-out .18s both; }
+    .stat-card, .side-link, .action-btn, .review-btn, .table-scroll-btn {
+        transition: transform .22s ease, box-shadow .22s ease, background-color .22s ease, color .22s ease;
+    }
+    .stat-card:hover { transform: translateY(-6px); }
+    .stat-icon { transition: transform .3s ease; }
+    .stat-card:hover .stat-icon { transform: rotate(-7deg) scale(1.08); }
+    .side-link:hover { transform: translateX(4px); }
+    .brand i { transition: transform .35s ease; }
+    .brand:hover i { transform: rotate(-10deg) scale(1.08); }
+    .status { animation: grailFadeUp .35s ease-out both; }
+    .activity-item { animation: grailFadeUp .45s ease-out both; }
+    .activity-item:nth-of-type(2) { animation-delay: .05s; }
+    .activity-item:nth-of-type(3) { animation-delay: .1s; }
+    .activity-item:nth-of-type(4) { animation-delay: .15s; }
+    .modal.fade .modal-dialog { transition: transform .25s ease-out; }
+    @media (prefers-reduced-motion: reduce) {
+        .sidebar, .content > .hero, .content > .overdue-alert,
+        .content > section[aria-label="Statistics"] .stat-card,
+        .content > .panel, .status, .activity-item {
+            animation: none !important;
+        }
+        *, *::before, *::after {
+            scroll-behavior: auto !important;
+            transition-duration: .01ms !important;
+            animation-duration: .01ms !important;
+            animation-iteration-count: 1 !important;
+        }
+    }
+
 </style>
 <link rel="stylesheet" href="assets/css/admin-theme.css">
 <style>
@@ -730,5 +795,13 @@ if (requestedActionId) {
   if (requestedTrigger) setTimeout(() => requestedTrigger.click(), 150);
 }
 </script>
+<script>
+  // If the browser restores this page from its back/forward cache, reload it so the
+  // server re-checks the login. A signed-out visitor is sent to login.php.
+  window.addEventListener('pageshow', function (e) {
+    if (e.persisted) { window.location.reload(); }
+  });
+</script>
 </body>
 </html>
+<?php require_once 'includes/footer.php'; ?>
