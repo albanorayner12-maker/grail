@@ -10,7 +10,7 @@ if (empty($_SESSION['resolution_csrf_token'])) {
 $caseId = strtoupper(trim((string) ($_POST['case_id'] ?? $_GET['case_id'] ?? '')));
 $outcome = trim((string) ($_POST['outcome'] ?? ''));
 $comment = trim((string) ($_POST['comment'] ?? ''));
-$accessCode = trim((string) ($_POST['access_code'] ?? ''));
+$accessCode = strtoupper(trim((string) ($_POST['access_code'] ?? '')));
 $error = '';
 $submitted = false;
 
@@ -27,7 +27,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } else {
         require_once 'db.php'; require_once 'includes/case_service.php';
         $case=case_find_by_credentials($pdo,$caseId,$accessCode);
-        if (!$case) { $error='The Case ID or private access code is incorrect.'; }
+        if (!$case) { $error='The Case ID or private access token is incorrect.'; }
         else {
             $pdo->prepare('INSERT INTO resolution_feedback (grievance_id,outcome,comment) VALUES (:id,:outcome,:comment)')->execute(['id'=>$case['id'],'outcome'=>$outcome,'comment'=>$comment]);
             case_add_event($pdo,(int)$case['id'],'resolution_feedback','Reporter verified the outcome',str_replace('_',' ',$outcome).($comment!==''?': '.$comment:''),'reporter',null,'Reporter',true);
@@ -81,7 +81,6 @@ require_once 'includes/header.php';
       <p class="mb-4" style="color: var(--deep-green); opacity: .78;">Case <strong><?= htmlspecialchars($caseId) ?></strong> remains administratively closed, while your separate reporter outcome is recorded as <strong><?= $outcome === 'confirmed_improvement' ? 'improvement confirmed' : 'unresolved' ?></strong>.</p>
       <div class="d-flex flex-wrap justify-content-center gap-3">
         <a href="track_case.php?case_id=<?= urlencode($caseId) ?>" class="btn verification-submit px-4"><i class="fas fa-arrow-left me-2"></i>Return to Case</a>
-        <a href="analytics.php" class="btn verification-submit px-4"><i class="fas fa-chart-column me-2"></i>View Public Outcomes</a>
       </div>
     </section>
   <?php else: ?>
@@ -94,13 +93,13 @@ require_once 'includes/header.php';
 
       <div class="mb-4">
         <label for="case_id" class="form-label">Case ID</label>
-        <input id="case_id" name="case_id" type="text" class="form-control form-control-lg" value="<?= htmlspecialchars($caseId) ?>" placeholder="ABC123" autocomplete="off" required>
+        <input id="case_id" name="case_id" type="text" class="form-control form-control-lg" value="<?= htmlspecialchars($caseId) ?>" placeholder="GRL-XXXX-XXXX-XXXX" autocomplete="off" required>
         <div class="form-text">Your Case ID connects this response without asking you to disclose your identity.</div>
       </div>
 
       <div class="mb-4">
-        <label for="access_code" class="form-label">Private access code</label>
-        <input id="access_code" name="access_code" type="password" inputmode="numeric" class="form-control form-control-lg" autocomplete="off" required>
+        <label for="access_code" class="form-label">Private access token</label>
+        <input id="access_code" name="access_code" type="password" class="form-control form-control-lg" autocomplete="off" placeholder="PAT-XXXX-XXXX-XXXX-XXXX" required>
         <div class="form-text">This prevents another person from submitting feedback using only your Case ID.</div>
       </div>
 
@@ -127,7 +126,7 @@ require_once 'includes/header.php';
       </fieldset>
 
       <div class="mb-4">
-        <label for="comment" class="form-label">Private explanation <span class="fw-normal">(optional)</span></label>
+        <label for="comment" class="form-label">Explanation <span class="fw-normal">(optional)</span></label>
         <textarea id="comment" name="comment" class="form-control" rows="5" maxlength="1000" placeholder="Briefly explain what improved or what remains unresolved."><?= htmlspecialchars($comment) ?></textarea>
         <div class="form-text">This response is intended for authorized case reviewers and aggregated outcome reporting.</div>
       </div>
