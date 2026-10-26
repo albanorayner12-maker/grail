@@ -1,22 +1,40 @@
 <?php
 if (session_status() === PHP_SESSION_NONE) { session_start(); }
 
+// 1. ALWAYS load the database connection script first at the absolute top of the page
+require_once __DIR__ . '/db.php';
+
 $user_display_name = trim((string) ($_SESSION['admin_name'] ?? $_SESSION['user_name'] ?? $_SESSION['admin_username'] ?? ''));
 if ($user_display_name === '') { $user_display_name = 'Preview User'; }
-require_once 'includes/case_data.php';
+
+// 2. Safely include your case details layout arrays
+require_once __DIR__ . '/includes/case_data.php';
 $caseRecords = grail_case_records();
 $overdueCases = count(array_filter($caseRecords, static fn($r) => !empty($r['is_overdue'])));
 
 $totalCases = count($caseRecords);
 $administrativelyClosed = count(array_filter($caseRecords, static fn($r)=>in_array(strtolower((string)$r['status']),['resolved','dismissed','completed','approved'],true)));
 $actionCompleted = count(array_filter($caseRecords, static fn($r)=>!empty($r['admin_action_taken'])));
-$reporterConfirmed = 0; $reporterUnresolved = 0;
-if (isset($_SESSION['admin_logged_in']) && empty($_SESSION['admin_preview'])) {
-    require_once 'db.php';
-    $feedbackCounts=$pdo->query('SELECT outcome,COUNT(*) total FROM resolution_feedback GROUP BY outcome')->fetchAll(PDO::FETCH_KEY_PAIR);
-    $reporterConfirmed=(int)($feedbackCounts['confirmed_improvement']??0);
-    $reporterUnresolved=(int)($feedbackCounts['unresolved']??0);
+
+$reporterConfirmed = 0; 
+$reporterUnresolved = 0;
+
+// 3. Process the query securely inside a try/catch block
+try {
+    // Check if the target table exists before running queries on it
+    $tableCheck = $pdo->query("SHOW TABLES LIKE 'resolution_feedback'")->fetch();
+    
+    if ($tableCheck) {
+        $feedbackCounts = $pdo->query('SELECT outcome, COUNT(*) total FROM resolution_feedback GROUP BY outcome')->fetchAll(PDO::FETCH_KEY_PAIR);
+        $reporterConfirmed = (int)($feedbackCounts['confirmed_improvement'] ?? 0);
+        $reporterUnresolved = (int)($feedbackCounts['unresolved'] ?? 0);
+    }
+} catch (PDOException $e) {
+    error_log("Analytics feedback query suppressed: " . $e->getMessage());
+    $reporterConfirmed = 0;
+    $reporterUnresolved = 0;
 }
+
 $closedWithoutConfirmation = max(0,$administrativelyClosed-$reporterConfirmed-$reporterUnresolved);
 $administrativeClosureRate = $totalCases ? round(($administrativelyClosed / $totalCases) * 100, 1) : 0;
 $reporterConfirmedRate = $administrativelyClosed ? round(($reporterConfirmed / $administrativelyClosed) * 100, 1) : 0;
